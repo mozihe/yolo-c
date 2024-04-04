@@ -4,20 +4,16 @@
 
 #include "yolov5_dnn.h"
 
-using namespace yolov5;
-
-void YOLOv5Detector::initConfig(std::string onnxpath, int iw, int ih, float threshold) {
+void yolov5::YOLOv5Detector::initConfig(std::string onnxpath, int iw, int ih, std::vector<std::string> labels, float threshold_score, float threshold_nms) {
     this->input_w = iw;
     this->input_h = ih;
-    this->threshold_score = threshold;
+    this->threshold_score = threshold_score;
+    this->threshold_nms = threshold_nms;
+    this->labels = labels;
     this->net = cv::dnn::readNetFromONNX(onnxpath);
-
-    this->net.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
-    this->net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
-    printf("唉，没cuda版本，只能用cpu了\n");
 }
 
-void YOLOv5Detector::detect(cv::Mat &frame, std::vector<DetectResult> &results) {
+void yolov5::YOLOv5Detector::detect(cv::Mat &frame, std::vector<DetectResult> &results) {
     int w = frame.cols;
     int h = frame.rows;
     int max = std::max(h, w);
@@ -27,11 +23,10 @@ void YOLOv5Detector::detect(cv::Mat &frame, std::vector<DetectResult> &results) 
     float x_factor = float(image.cols) / float(input_w);
     float y_factor = float(image.rows) / float(input_h);
 
-    cv::Mat blob = cv::dnn::blobFromImage(image, 1 / 255.0, cv::Size(this->input_w, this->input_h), cv::Scalar(0, 0, 0),
-                                          true, false);
+    cv::Mat blob = cv::dnn::blobFromImage(image, 1 / 255.0, cv::Size(this->input_w, this->input_h), cv::Scalar(0, 0, 0), true, false);
     this->net.setInput(blob);
-    cv::Mat preds = this->net.forward();
-    cv::Mat det_output(preds.size[1], preds.size[2], CV_32F, preds.ptr<float>());
+    cv::Mat forward = this->net.forward();
+    cv::Mat det_output(forward.size[1], forward.size[2], CV_32F, forward.ptr<float>());
 
     std::vector<cv::Rect> boxes;
     std::vector<int> classIds;
@@ -42,7 +37,7 @@ void YOLOv5Detector::detect(cv::Mat &frame, std::vector<DetectResult> &results) 
             continue;
         }
         std::cout << "confidence: " << confidence << std::endl;
-        cv::Mat classes_scores = det_output.row(i).colRange(5, 6);
+        cv::Mat classes_scores = det_output.row(i).colRange(5, labels.size() + 5);
         cv::Point classIdPoint;
         double score;
         minMaxLoc(classes_scores, nullptr, &score, nullptr, &classIdPoint);
@@ -67,17 +62,17 @@ void YOLOv5Detector::detect(cv::Mat &frame, std::vector<DetectResult> &results) 
     }
 
     std::vector<int> indexes;
-    cv::dnn::NMSBoxes(boxes, confidences, threshold_score, 0.45, indexes);
-    for (size_t i = 0; i < indexes.size(); i++) {
+    cv::dnn::NMSBoxes(boxes, confidences, threshold_score, threshold_nms, indexes);
+
+    for (int index : indexes) {
         DetectResult dr;
-        int index = indexes[i];
         int idx = classIds[index];
         dr.box = boxes[index];
         dr.classId = idx;
         dr.score = confidences[index];
         cv::rectangle(frame, boxes[index], cv::Scalar(0, 0, 255), 2, 8);
-        cv::rectangle(frame, cv::Point(boxes[index].tl().x, boxes[index].tl().y - 20),
-                      cv::Point(boxes[index].br().x, boxes[index].tl().y), cv::Scalar(0, 255, 255), -1);
+        cv::rectangle(frame, cv::Point(boxes[index].tl().x, boxes[index].tl().y - 20),cv::Point(boxes[index].br().x, boxes[index].tl().y), cv::Scalar(0, 255, 255), -1);
+        cv::putText(frame, labels[idx], cv::Point(boxes[index].tl().x, boxes[index].tl().y - 10), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0));
         results.push_back(dr);
     }
 
@@ -85,6 +80,22 @@ void YOLOv5Detector::detect(cv::Mat &frame, std::vector<DetectResult> &results) 
     std::vector<double> layersTimings;
     double freq = cv::getTickFrequency() / 1000.0;
     double time = net.getPerfProfile(layersTimings) / freq;
-    ss << "FPS: " << 1000 / time << " ; time : " << time << " ms";
+    ss << "FPS: " << 1000 / time;
     putText(frame, ss.str(), cv::Point(20, 40), cv::FONT_HERSHEY_PLAIN, 2.0, cv::Scalar(255, 0, 0), 2, 8);
+}
+
+void yolov5::YOLOv5Detector::run() {
+    cv::VideoCapture capture(0);
+    cv::Mat frame;
+    std::vector<DetectResult> results;
+    while (true) {
+        capture.read(frame);
+        detect(frame, results);
+        cv::imshow("opencv", frame);
+        char c = char(cv::waitKey(1));
+        if (c == 27) {
+            break;
+        }
+        results.clear();
+    }
 }

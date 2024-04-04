@@ -17,14 +17,17 @@ namespace yolov5 {
 
     class YOLOv5Detector {
     public:
-        void initConfig(std::string onnxpath, int iw, int ih, float threshold);
+        void initConfig(std::string onnxpath, int iw, int ih, std::vector<std::string> labels, float threshold_score = 0.25, float threshold_nms = 0.45);
         void detect(cv::Mat & frame, std::vector<DetectResult> &result);
+        void run();
     private:
         int input_w = 640;
         int input_h = 480;
         cv::dnn::Net net;
         float threshold_score = 0.25;
+        float threshold_nms = 0.45;
+        std::vector<std::string> labels;
     };
 }
 
-#endif //YOLOV5_DNN_H
+#endif
